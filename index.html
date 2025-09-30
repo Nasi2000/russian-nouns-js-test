@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Склонение слов — RussianNounsJS (демо)</title>
+  <style>
+    :root { --bg:#fff; --card:#fff; --text:#000; --muted:#94a3b8; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin:0; background:var(--bg); color:var(--text); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Helvetica, Arial; }
+    .container { max-width: 1000px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 22px; margin: 0 0 16px; }
+    .panel { background:var(--card); border:1px solid #1f2937; border-radius: 12px; padding:16px; margin-bottom:16px; }
+    label { display:block; margin-bottom:8px; color:var(--muted); font-size:12px; }
+    input[type="text"], select { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #334155; background:#fff; color:var(--text); }
+    .grid { display:grid; gap:12px; }
+    .grid-2 { grid-template-columns: 1fr 1fr; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .checkbox { display:flex; align-items:center; gap:8px; color:var(--muted); }
+    button { cursor:pointer; border:1px solid #334155; background:#eee; color:var(--text); padding:8px 12px; border-radius:8px; }
+    button.primary { background:#0a2640; border-color:#1e3a8a; color: #fff; }
+    .examples { display:flex; flex-wrap:wrap; gap:8px; }
+    .card { background:#fff; border:1px solid #1f2937; border-radius:10px; padding:12px; margin-top:12px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { border-bottom:1px solid #1f2937; padding:8px 6px; text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-weight:600; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .muted { color:var(--muted); }
+    .warn { color:#fca5a5; }
+    .footer { margin-top:24px; color:var(--muted); font-size:12px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Тест склонения слов</h1>
+
+  <div class="panel grid">
+    <div>
+      <label>Слово или фраза (каждое слово склоняется отдельно)</label>
+      <input id="input" type="text" placeholder="Персик | Барсик | Зевс" value="Персик" />
+    </div>
+
+    <div class="grid grid-2">
+      <div>
+        <label>Род</label>
+        <select id="gender">
+          <option value="MASCULINE" selected>мужской</option>
+          <option value="FEMININE">женский</option>
+          <option value="NEUTER">средний</option>
+        </select>
+      </div>
+      <div>
+        <label>Особенности</label>
+        <div class="row">
+          <label class="checkbox"><input id="lower" type="checkbox" /> Приводить к нижнему регистру</label>
+          <label class="checkbox"><input id="indeclinable" type="checkbox" /> Несклоняемое (indeclinable)</label>
+          <label class="checkbox"><input id="plurale" type="checkbox" /> Только мн. число (plurale tantum)</label>
+          <button id="run" class="primary">Склонить</button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="muted" style="margin-bottom:8px">Примеры:</div>
+      <div class="examples" id="examples"></div>
+    </div>
+  </div>
+
+  <div id="loading" style="display:none; color:var(--muted); font-size:12px; margin-bottom:16px;">
+    Загрузка библиотеки склонения...
+  </div>
+  <div id="results"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/russian-nouns-js@2.3.0/RussianNouns.js"></script>
+
+<script>
+  const $ = (sel) => document.querySelector(sel);
+  const input = $('#input');
+  const genderSel = $('#gender');
+  const lowerChk = $('#lower');
+  const indeclChk = $('#indeclinable');
+  const pluraleChk = $('#plurale');
+  const runBtn = $('#run');
+  const results = $('#results');
+  const examples = $('#examples');
+  const loading = $('#loading');
+
+  const sampleValues = [
+    'Персик', 'Барсик', 'Зевс',
+    'кот Персик', 'книга Зевса',
+    'Нур-Султан', 'Алматы',
+    'Zhang', 'Wei', 'Choi', 'Minho', 'Kim', 'Taeyang',
+    'пальто', 'ножницы'
+  ];
+
+  for (const s of sampleValues) {
+    const b = document.createElement('button');
+    b.textContent = s;
+    b.onclick = () => { input.value = s; decline(); };
+    examples.appendChild(b);
+  }
+
+  // Инициализация библиотеки
+  let Engine, Gender, Case, CASES, createLemma, rne, caseList;
+  
+  function initLibrary() {
+    if (!window.RussianNouns) {
+      console.error('Библиотека RussianNouns не загружена!');
+      results.innerHTML = '<div class="warn">Ошибка: Библиотека RussianNouns не загружена. Проверьте подключение к интернету.</div>';
+      return false;
+    }
+
+    const lib = window.RussianNouns;
+    Engine = lib.Engine;
+    Gender = lib.Gender;
+    Case = lib.Case;
+    CASES = lib.CASES;
+    createLemma = lib.createLemma;
+    rne = new Engine();
+    
+    // Создаем список падежей после инициализации библиотеки
+    caseList = [
+      [Case.NOMINATIVE, 'Именительный'],
+      [Case.GENITIVE, 'Родительный'],
+      [Case.DATIVE, 'Дательный'],
+      [Case.ACCUSATIVE, 'Винительный'],
+      [Case.INSTRUMENTAL, 'Творительный'],
+      [Case.PREPOSITIONAL, 'Предложный'],
+      [Case.LOCATIVE, 'Местный (локатив)']
+    ];
+    
+    console.log('Библиотека RussianNouns загружена:', {
+      Engine: !!Engine,
+      Gender: !!Gender,
+      Case: !!Case,
+      CASES: !!CASES,
+      createLemma: !!createLemma
+    });
+    
+    return true;
+  }
+
+  function tokenize(s) {
+    return s.split(/\s+/).map(t => t.trim()).filter(Boolean);
+  }
+
+  function buildLemma(token) {
+    const text = lowerChk.checked ? token.toLowerCase() : token;
+    const lemmaData = { 
+      text: text, 
+      gender: Gender[genderSel.value] 
+    };
+    if (indeclChk.checked) lemmaData.indeclinable = true;
+    if (pluraleChk.checked) lemmaData.pluraleTantum = true;
+    
+    console.log('Создаем лемму для слова:', token, 'с данными:', lemmaData);
+    
+    try {
+      const lemma = createLemma(lemmaData);
+      console.log('Лемма создана:', lemma);
+      return lemma;
+    } catch (e) {
+      console.error('Ошибка создания леммы:', e);
+      throw e;
+    }
+  }
+
+  function declineOne(token) {
+    try {
+      const lemma = buildLemma(token);
+      
+      // Проверяем, что лемма создана корректно
+      if (!lemma || !lemma.text) {
+        throw new Error('Не удалось создать лемму для слова: ' + token);
+      }
+
+      const rows = caseList.map(([c, label]) => {
+        try {
+          const forms = rne.decline(lemma, c);
+          if (!forms || forms.length === 0) {
+            return [label, token]; // Возвращаем исходное слово, если склонение не удалось
+          }
+          return [label, forms.join(' / ')];
+        } catch (e) {
+          console.warn('Ошибка склонения для падежа', label, ':', e.message);
+          return [label, token];
+        }
+      });
+
+      let pluralBlock = null;
+      if (!pluraleChk.checked) {
+        try {
+          const pluralForms = rne.pluralize(lemma);
+          if (pluralForms && pluralForms.length > 0) {
+            const pluralNom = pluralForms[0];
+            const pluralRows = caseList.map(([c, label]) => {
+              try {
+                const forms = rne.decline(lemma, c, pluralNom);
+                if (!forms || forms.length === 0) {
+                  return [label, pluralNom];
+                }
+                return [label, forms.join(' / ')];
+              } catch (e) {
+                console.warn('Ошибка склонения мн.ч. для падежа', label, ':', e.message);
+                return [label, pluralNom];
+              }
+            });
+            pluralBlock = { pluralNom, pluralRows };
+          }
+        } catch (e) {
+          console.warn('Ошибка создания множественного числа:', e.message);
+        }
+      }
+
+      return { ok: true, token, rows, pluralBlock };
+    } catch (e) {
+      console.error('Общая ошибка склонения для слова', token, ':', e);
+      return { 
+        ok: false, 
+        token, 
+        error: e && e.message ? e.message : String(e) 
+      };
+    }
+  }
+
+  function decline() {
+    if (!Engine || !rne || !caseList) {
+      console.error('Библиотека не инициализирована');
+      results.innerHTML = '<div class="warn">Библиотека склонения не готова. Попробуйте еще раз.</div>';
+      return;
+    }
+    
+    const tokens = tokenize(input.value);
+    results.innerHTML = '';
+    loading.style.display = 'none';
+    
+    if (!tokens.length) {
+      results.innerHTML = '<div class="muted">Введите слово</div>';
+      return;
+    }
+
+    console.log('Начинаем склонение слов:', tokens);
+    console.log('Настройки:', {
+      gender: genderSel.value,
+      lower: lowerChk.checked,
+      indeclinable: indeclChk.checked,
+      plurale: pluraleChk.checked
+    });
+
+    for (const t of tokens) {
+      console.log('Склоняем слово:', t);
+      const res = declineOne(t);
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const title = document.createElement('div');
+      title.innerHTML = 'Слово: <strong>' + escapeHtml(res.token) + '</strong>';
+      card.appendChild(title);
+
+      if (res.ok) {
+        console.log('Успешно склонено:', res);
+        const table = createTable([['Падеж', 'Форма (ед. ч.)']], res.rows);
+        card.appendChild(table);
+
+        if (res.pluralBlock) {
+          const h = document.createElement('div');
+          h.className = 'muted';
+          h.style.marginTop = '10px';
+          h.textContent = 'Множественное число (Ном.: ' + res.pluralBlock.pluralNom + ')';
+          card.appendChild(h);
+          const tablePl = createTable([['Падеж', 'Форма (мн. ч.)']], res.pluralBlock.pluralRows);
+          card.appendChild(tablePl);
+        }
+      } else {
+        console.error('Ошибка склонения:', res);
+        const p = document.createElement('div');
+        p.className = 'warn';
+        p.textContent = 'Ошибка: ' + res.error;
+        card.appendChild(p);
+      }
+      results.appendChild(card);
+    }
+
+    if (tokens.length > 1) {
+      const note = document.createElement('div');
+      note.className = 'muted';
+      note.style.marginTop = '12px';
+      note.textContent = 'Каждое слово склоняется отдельно';
+      results.appendChild(note);
+    }
+  }
+
+  function createTable(header, rows) {
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const trh = document.createElement('tr');
+    for (const h of header[0]) { const th = document.createElement('th'); th.textContent = h; trh.appendChild(th); }
+    thead.appendChild(trh); table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      const td1 = document.createElement('td'); td1.textContent = r[0]; tr.appendChild(td1);
+      const td2 = document.createElement('td'); td2.className = 'mono'; td2.textContent = r[1]; tr.appendChild(td2);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, function (ch) { return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' })[ch]; });
+  }
+
+  runBtn.addEventListener('click', decline);
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter') decline(); });
+
+  // Ждем загрузки библиотеки и затем запускаем склонение
+  function waitForLibrary() {
+    if (initLibrary()) {
+      loading.style.display = 'none';
+      decline();
+    } else {
+      loading.style.display = 'block';
+      console.log('Ожидаем загрузки библиотеки RussianNouns...');
+      setTimeout(waitForLibrary, 100);
+    }
+  }
+
+  waitForLibrary();
+</script>
+</body>
+</html>
