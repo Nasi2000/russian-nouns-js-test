@@ -89,6 +89,7 @@
 
   const sampleValues = [
     'Персик', 'Барсик', 'Зевс',
+    'Барсик Петрович', 'Иван Петров', 'Мария Ивановна',
     'кот Персик', 'книга Зевса',
     'Нур-Султан', 'Алматы',
     'Zhang', 'Wei', 'Choi', 'Minho', 'Kim', 'Taeyang',
@@ -143,7 +144,21 @@
   }
 
   function tokenize(s) {
-    return s.split(/\s+/).map(t => t.trim()).filter(Boolean);
+    const tokens = s.split(/\s+/).map(t => t.trim()).filter(Boolean);
+    
+    // Проверяем, является ли это ФИО (2-3 слова с заглавными буквами)
+    if (tokens.length >= 2 && tokens.length <= 3) {
+      const allCapitalized = tokens.every(token => 
+        token.length > 0 && token[0] === token[0].toUpperCase()
+      );
+      
+      if (allCapitalized) {
+        // Возвращаем как единое ФИО
+        return [tokens.join(' ')];
+      }
+    }
+    
+    return tokens;
   }
 
   function buildLemma(token) {
@@ -169,52 +184,97 @@
 
   function declineOne(token) {
     try {
-      const lemma = buildLemma(token);
+      // Проверяем, является ли это ФИО (содержит пробелы)
+      const isFIO = token.includes(' ');
       
-      // Проверяем, что лемма создана корректно
-      if (!lemma || !lemma.text) {
-        throw new Error('Не удалось создать лемму для слова: ' + token);
-      }
-
-      const rows = caseList.map(([c, label]) => {
-        try {
-          const forms = rne.decline(lemma, c);
-          if (!forms || forms.length === 0) {
-            return [label, token]; // Возвращаем исходное слово, если склонение не удалось
+      if (isFIO) {
+        // Для ФИО склоняем каждое слово отдельно, но показываем как единое целое
+        const parts = token.split(' ');
+        const declinedParts = parts.map(part => {
+          try {
+            const lemma = buildLemma(part);
+            if (!lemma || !lemma.text) {
+              return part; // Возвращаем исходную часть, если не удалось создать лемму
+            }
+            
+            // Склоняем только в именительном падеже для демонстрации
+            const forms = rne.decline(lemma, Case.NOMINATIVE);
+            return forms && forms.length > 0 ? forms[0] : part;
+          } catch (e) {
+            console.warn('Ошибка склонения части ФИО', part, ':', e.message);
+            return part;
           }
-          return [label, forms.join(' / ')];
-        } catch (e) {
-          console.warn('Ошибка склонения для падежа', label, ':', e.message);
-          return [label, token];
-        }
-      });
-
-      let pluralBlock = null;
-      if (!pluraleChk.checked) {
-        try {
-          const pluralForms = rne.pluralize(lemma);
-          if (pluralForms && pluralForms.length > 0) {
-            const pluralNom = pluralForms[0];
-            const pluralRows = caseList.map(([c, label]) => {
+        });
+        
+        // Для ФИО показываем только базовую информацию
+        const rows = caseList.map(([c, label]) => {
+          try {
+            const declinedFIO = parts.map(part => {
               try {
-                const forms = rne.decline(lemma, c, pluralNom);
-                if (!forms || forms.length === 0) {
-                  return [label, pluralNom];
-                }
-                return [label, forms.join(' / ')];
+                const lemma = buildLemma(part);
+                const forms = rne.decline(lemma, c);
+                return forms && forms.length > 0 ? forms[0] : part;
               } catch (e) {
-                console.warn('Ошибка склонения мн.ч. для падежа', label, ':', e.message);
-                return [label, pluralNom];
+                return part;
               }
             });
-            pluralBlock = { pluralNom, pluralRows };
+            return [label, declinedFIO.join(' ')];
+          } catch (e) {
+            console.warn('Ошибка склонения ФИО для падежа', label, ':', e.message);
+            return [label, token];
           }
-        } catch (e) {
-          console.warn('Ошибка создания множественного числа:', e.message);
+        });
+        
+        return { ok: true, token, rows, isFIO: true };
+      } else {
+        // Обычное склонение для одного слова
+        const lemma = buildLemma(token);
+        
+        // Проверяем, что лемма создана корректно
+        if (!lemma || !lemma.text) {
+          throw new Error('Не удалось создать лемму для слова: ' + token);
         }
-      }
 
-      return { ok: true, token, rows, pluralBlock };
+        const rows = caseList.map(([c, label]) => {
+          try {
+            const forms = rne.decline(lemma, c);
+            if (!forms || forms.length === 0) {
+              return [label, token]; // Возвращаем исходное слово, если склонение не удалось
+            }
+            return [label, forms.join(' / ')];
+          } catch (e) {
+            console.warn('Ошибка склонения для падежа', label, ':', e.message);
+            return [label, token];
+          }
+        });
+
+        let pluralBlock = null;
+        if (!pluraleChk.checked) {
+          try {
+            const pluralForms = rne.pluralize(lemma);
+            if (pluralForms && pluralForms.length > 0) {
+              const pluralNom = pluralForms[0];
+              const pluralRows = caseList.map(([c, label]) => {
+                try {
+                  const forms = rne.decline(lemma, c, pluralNom);
+                  if (!forms || forms.length === 0) {
+                    return [label, pluralNom];
+                  }
+                  return [label, forms.join(' / ')];
+                } catch (e) {
+                  console.warn('Ошибка склонения мн.ч. для падежа', label, ':', e.message);
+                  return [label, pluralNom];
+                }
+              });
+              pluralBlock = { pluralNom, pluralRows };
+            }
+          } catch (e) {
+            console.warn('Ошибка создания множественного числа:', e.message);
+          }
+        }
+
+        return { ok: true, token, rows, pluralBlock };
+      }
     } catch (e) {
       console.error('Общая ошибка склонения для слова', token, ':', e);
       return { 
@@ -261,17 +321,31 @@
 
       if (res.ok) {
         console.log('Успешно склонено:', res);
-        const table = createTable([['Падеж', 'Форма (ед. ч.)']], res.rows);
-        card.appendChild(table);
+        
+        if (res.isFIO) {
+          // Для ФИО показываем специальную таблицу
+          const table = createTable([['Падеж', 'Форма']], res.rows);
+          card.appendChild(table);
+          
+          const note = document.createElement('div');
+          note.className = 'muted';
+          note.style.marginTop = '10px';
+          note.textContent = 'ФИО склоняется по частям (имя, фамилия, отчество)';
+          card.appendChild(note);
+        } else {
+          // Обычное склонение
+          const table = createTable([['Падеж', 'Форма (ед. ч.)']], res.rows);
+          card.appendChild(table);
 
-        if (res.pluralBlock) {
-          const h = document.createElement('div');
-          h.className = 'muted';
-          h.style.marginTop = '10px';
-          h.textContent = 'Множественное число (Ном.: ' + res.pluralBlock.pluralNom + ')';
-          card.appendChild(h);
-          const tablePl = createTable([['Падеж', 'Форма (мн. ч.)']], res.pluralBlock.pluralRows);
-          card.appendChild(tablePl);
+          if (res.pluralBlock) {
+            const h = document.createElement('div');
+            h.className = 'muted';
+            h.style.marginTop = '10px';
+            h.textContent = 'Множественное число (Ном.: ' + res.pluralBlock.pluralNom + ')';
+            card.appendChild(h);
+            const tablePl = createTable([['Падеж', 'Форма (мн. ч.)']], res.pluralBlock.pluralRows);
+            card.appendChild(tablePl);
+          }
         }
       } else {
         console.error('Ошибка склонения:', res);
