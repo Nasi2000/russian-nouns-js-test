@@ -90,6 +90,7 @@
   const sampleValues = [
     'Персик', 'Барсик', 'Зевс',
     'Барсик Петрович', 'Иван Петров', 'Мария Ивановна',
+    'Анна-Мария', 'Жан-Поль', 'Мария-Антуанетта',
     'кот Персик', 'книга Зевса',
     'Нур-Султан', 'Алматы',
     'Zhang', 'Wei', 'Choi', 'Minho', 'Kim', 'Taeyang',
@@ -158,7 +159,82 @@
       }
     }
     
+    // Проверяем составные имена с дефисом (например, Анна-Мария)
+    if (tokens.length === 1 && tokens[0].includes('-')) {
+      const parts = tokens[0].split('-');
+      if (parts.length === 2 && parts.every(part => 
+        part.length > 0 && part[0] === part[0].toUpperCase()
+      )) {
+        // Возвращаем как составное имя
+        return [tokens[0]];
+      }
+    }
+    
     return tokens;
+  }
+
+  // Вспомогательные функции для работы с ФИО
+  function isLikelySurname(word) {
+    // Простая эвристика для определения фамилий
+    const surnameEndings = ['ов', 'ев', 'ин', 'ын', 'ский', 'цкий', 'ова', 'ева', 'ина', 'ына', 'ская', 'цкая'];
+    return surnameEndings.some(ending => word.toLowerCase().endsWith(ending));
+  }
+  
+  function isLikelyName(word) {
+    // Простая эвристика для определения имен
+    const commonNames = ['иван', 'петр', 'сергей', 'андрей', 'алексей', 'дмитрий', 'николай', 'михаил', 'владимир', 'александр',
+                        'анна', 'мария', 'елена', 'наталья', 'ольга', 'татьяна', 'ирина', 'светлана', 'юлия', 'екатерина'];
+    return commonNames.includes(word.toLowerCase());
+  }
+  
+  function isLikelyPatronymic(word) {
+    // Простая эвристика для определения отчеств
+    const patronymicEndings = ['ович', 'евич', 'ич', 'овна', 'евна', 'ична', 'инична'];
+    return patronymicEndings.some(ending => word.toLowerCase().endsWith(ending));
+  }
+  
+  function declineSurname(surname, caseType) {
+    // Специальная логика склонения фамилий
+    const lowerSurname = surname.toLowerCase();
+    
+    // Женские фамилии на -ова, -ева, -ина, -ына
+    if (lowerSurname.endsWith('ова') || lowerSurname.endsWith('ева') || 
+        lowerSurname.endsWith('ина') || lowerSurname.endsWith('ына')) {
+      const base = surname.slice(0, -1); // Убираем последнюю букву
+      switch (caseType) {
+        case Case.GENITIVE: return base + 'ой';
+        case Case.DATIVE: return base + 'ой';
+        case Case.ACCUSATIVE: return base + 'у';
+        case Case.INSTRUMENTAL: return base + 'ой';
+        case Case.PREPOSITIONAL: return base + 'ой';
+        case Case.LOCATIVE: return base + 'ой';
+        default: return surname;
+      }
+    }
+    
+    // Мужские фамилии на -ов, -ев, -ин, -ын
+    if (lowerSurname.endsWith('ов') || lowerSurname.endsWith('ев') || 
+        lowerSurname.endsWith('ин') || lowerSurname.endsWith('ын')) {
+      const base = surname.slice(0, -2); // Убираем последние две буквы
+      switch (caseType) {
+        case Case.GENITIVE: return base + 'а';
+        case Case.DATIVE: return base + 'у';
+        case Case.ACCUSATIVE: return base + 'а';
+        case Case.INSTRUMENTAL: return base + 'ым';
+        case Case.PREPOSITIONAL: return base + 'е';
+        case Case.LOCATIVE: return base + 'е';
+        default: return surname;
+      }
+    }
+    
+    // Если не удалось определить тип фамилии, используем обычную логику
+    try {
+      const lemma = buildLemma(surname);
+      const forms = rne.decline(lemma, caseType);
+      return forms && forms.length > 0 ? forms[0] : surname;
+    } catch (e) {
+      return surname;
+    }
   }
 
   function buildLemma(token) {
@@ -186,36 +262,70 @@
     try {
       // Проверяем, является ли это ФИО (содержит пробелы)
       const isFIO = token.includes(' ');
+      const isCompoundName = token.includes('-');
       
-      if (isFIO) {
-        // Для ФИО склоняем каждое слово отдельно, но показываем как единое целое
-        const parts = token.split(' ');
-        const declinedParts = parts.map(part => {
-          try {
-            const lemma = buildLemma(part);
-            if (!lemma || !lemma.text) {
-              return part; // Возвращаем исходную часть, если не удалось создать лемму
-            }
-            
-            // Склоняем только в именительном падеже для демонстрации
-            const forms = rne.decline(lemma, Case.NOMINATIVE);
-            return forms && forms.length > 0 ? forms[0] : part;
-          } catch (e) {
-            console.warn('Ошибка склонения части ФИО', part, ':', e.message);
-            return part;
-          }
-        });
-        
-        // Для ФИО показываем только базовую информацию
+      if (isCompoundName) {
+        // Склонение составных имен (например, Анна-Мария)
+        const parts = token.split('-');
         const rows = caseList.map(([c, label]) => {
           try {
-            const declinedFIO = parts.map(part => {
+            const declinedParts = parts.map(part => {
               try {
                 const lemma = buildLemma(part);
                 const forms = rne.decline(lemma, c);
                 return forms && forms.length > 0 ? forms[0] : part;
               } catch (e) {
+                console.warn('Ошибка склонения части составного имени', part, ':', e.message);
                 return part;
+              }
+            });
+            return [label, declinedParts.join('-')];
+          } catch (e) {
+            console.warn('Ошибка склонения составного имени для падежа', label, ':', e.message);
+            return [label, token];
+          }
+        });
+        
+        return { ok: true, token, rows, isCompoundName: true };
+      } else if (isFIO) {
+        // Для ФИО используем улучшенную логику склонения
+        const parts = token.split(' ');
+        const isCompoundName = token.includes('-');
+        
+        // Определяем тип каждой части ФИО
+        const fioParts = parts.map(part => {
+          const isSurname = isLikelySurname(part);
+          const isName = isLikelyName(part);
+          const isPatronymic = isLikelyPatronymic(part);
+          
+          return {
+            text: part,
+            type: isSurname ? 'surname' : isName ? 'name' : isPatronymic ? 'patronymic' : 'unknown',
+            indeclinable: false // Пока не поддерживаем несклоняемые части
+          };
+        });
+        
+        // Для ФИО показываем склонение с улучшенной логикой
+        const rows = caseList.map(([c, label]) => {
+          try {
+            const declinedFIO = fioParts.map(partInfo => {
+              if (partInfo.indeclinable) {
+                return partInfo.text; // Несклоняемая часть
+              }
+              
+              try {
+                // Для фамилий используем специальную логику
+                if (partInfo.type === 'surname') {
+                  return declineSurname(partInfo.text, c);
+                }
+                
+                // Для имен и отчеств используем обычную логику
+                const lemma = buildLemma(partInfo.text);
+                const forms = rne.decline(lemma, c);
+                return forms && forms.length > 0 ? forms[0] : partInfo.text;
+              } catch (e) {
+                console.warn('Ошибка склонения части ФИО', partInfo.text, ':', e.message);
+                return partInfo.text;
               }
             });
             return [label, declinedFIO.join(' ')];
@@ -225,7 +335,7 @@
           }
         });
         
-        return { ok: true, token, rows, isFIO: true };
+        return { ok: true, token, rows, isFIO: true, fioParts };
       } else {
         // Обычное склонение для одного слова
         const lemma = buildLemma(token);
@@ -322,7 +432,17 @@
       if (res.ok) {
         console.log('Успешно склонено:', res);
         
-        if (res.isFIO) {
+        if (res.isCompoundName) {
+          // Для составных имен показываем специальную таблицу
+          const table = createTable([['Падеж', 'Форма']], res.rows);
+          card.appendChild(table);
+          
+          const note = document.createElement('div');
+          note.className = 'muted';
+          note.style.marginTop = '10px';
+          note.textContent = 'Составное имя склоняется по частям';
+          card.appendChild(note);
+        } else if (res.isFIO) {
           // Для ФИО показываем специальную таблицу
           const table = createTable([['Падеж', 'Форма']], res.rows);
           card.appendChild(table);
